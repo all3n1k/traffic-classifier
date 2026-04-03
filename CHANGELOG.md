@@ -8,23 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Benchmark Module**: Performance tracking in `backend/src/benchmark.rs`
+  - `BenchmarkMetrics` struct for tracking PPS, latency, memory
+  - `BenchmarkRecorder` for thread-safe atomic metrics
+  - `BenchmarkRunner` for running benchmark tests
+  - Integrated into AppState for live metrics
 - **TOML Config Support**: Full configuration file system (`config.toml`)
-  - Capture, classification, server, flow, performance, logging, dev sections
-  - CLI args: `-c/--config` to load config file
-- **Config Module**: Rust config parsing with serde
-  - `backend/src/config.rs` - Full configuration handling
-  - Default values, file loading, CLI override precedence
-- **Structured Logging**: Configurable log levels (trace, debug, info, warn, error)
+- **Structured Logging**: Configurable log levels
 
 ### Changed
 - **README**: Complete rewrite for human readability
-  - Quick start in 3 steps
-  - ASCII diagram showing how it works
-  - Command reference table
-  - Troubleshooting section
+- **Backend**: Integrated benchmark recording into packet processing
 
 ### Fixed
-- **Rust compiler warnings**: Unused imports, duplicate path imports
+- Rust compiler warnings
 
 ### Architecture
 ```

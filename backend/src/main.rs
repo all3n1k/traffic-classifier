@@ -1,6 +1,7 @@
 use anyhow::Result;
 use capture::{start_capture, CaptureConfig, ClassifierOutput};
 use config::Config;
+use benchmark::{BenchmarkRecorder, BenchmarkMetrics};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::PathBuf;
 
 mod config;
+mod benchmark;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsMessage {
@@ -37,6 +39,7 @@ pub struct AppState {
     packets_this_second: Arc<AtomicU64>,
     current_pps: RwLock<f64>,
     flows: Arc<RwLock<HashMap<String, FlowSummary>>>,
+    benchmark: BenchmarkRecorder,
 }
 
 impl AppState {
@@ -48,12 +51,16 @@ impl AppState {
             packets_this_second: Arc::new(AtomicU64::new(0)),
             current_pps: RwLock::new(0.0),
             flows: Arc::new(RwLock::new(HashMap::new())),
+            benchmark: BenchmarkRecorder::new(),
         }
     }
 
     async fn record_packet(&self, output: &ClassifierOutput) {
         self.total_packets.fetch_add(1, Ordering::Relaxed);
         self.packets_this_second.fetch_add(1, Ordering::Relaxed);
+        
+        // Record benchmark metrics
+        self.benchmark.record_packet(output.features.packet_size);
 
         let mut counts = self.classification_counts.write().await;
         *counts.entry(output.class_name.clone()).or_insert(0) += 1;
@@ -94,6 +101,10 @@ impl AppState {
             flows: flows_list,
             timestamp: chrono::Utc::now().timestamp(),
         }
+    }
+    
+    fn get_benchmark(&self) -> BenchmarkMetrics {
+        self.benchmark.snapshot()
     }
 }
 
