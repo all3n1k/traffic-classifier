@@ -1,6 +1,6 @@
 pub mod capture;
 pub use capture::start_capture;
-pub use capture::{PacketFeatures, ClassifierOutput};
+pub use capture::{PacketFeatures, ClassifierOutput, CaptureConfig};
 
 pub struct TrafficClassifier;
 

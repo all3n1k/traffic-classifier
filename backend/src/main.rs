@@ -1,5 +1,5 @@
 use anyhow::Result;
-use capture::{start_capture, ClassifierOutput};
+use capture::{start_capture, CaptureConfig, ClassifierOutput};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -124,13 +124,13 @@ async fn handle_ws_connection(
 }
 
 async fn start_capture_task(
-    device: String,
+    config: CaptureConfig,
     state: Arc<AppState>,
 ) {
     let (tx, mut rx) = mpsc::channel::<ClassifierOutput>(1000);
 
     tokio::spawn(async move {
-        if let Err(e) = start_capture(device, tx).await {
+        if let Err(e) = start_capture(config, tx).await {
             eprintln!("Capture error: {}", e);
         }
     });
@@ -142,20 +142,81 @@ async fn start_capture_task(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse command-line arguments
+    let args: Vec<String> = std::env::args().collect();
+    
+    // Default to simulation mode
+    let mut config = CaptureConfig::simulation();
+    let mut ws_port = 8080;
+    
+    for i in 1..args.len() {
+        match args[i].as_str() {
+            "--mode" | "-m" if i + 1 < args.len() => {
+                config.mode = args[i + 1].clone();
+            }
+            "--interface" | "-i" if i + 1 < args.len() => {
+                config.interface = Some(args[i + 1].clone());
+            }
+            "--pps" if i + 1 < args.len() => {
+                config.simulation_pps = args[i + 1].parse().unwrap_or(10000);
+            }
+            "--port" if i + 1 < args.len() => {
+                ws_port = args[i + 1].parse().unwrap_or(8080);
+            }
+            "--verbose" | "-v" => {
+                config.verbose = true;
+            }
+            "--help" | "-h" => {
+                println!("Traffic Classifier Backend");
+                println!();
+                println!("Usage: traffic-classifier-backend [OPTIONS]");
+                println!();
+                println!("Capture Options:");
+                println!("  -m, --mode MODE       Capture mode: simulation (default) or pcap");
+                println!("  -i, --interface IFACE Network interface for pcap mode (e.g., eth0, lo0)");
+                println!("  -p, --pps RATE        Packets per second for simulation (default: 10000)");
+                println!("  -v, --verbose         Enable verbose logging");
+                println!();
+                println!("Server Options:");
+                println!("  --port PORT          WebSocket server port (default: 8080)");
+                println!();
+                println!("Examples:");
+                println!("  # Simulation mode (default)");
+                println!("  traffic-classifier-backend");
+                println!();
+                println!("  # High-speed simulation");
+                println!("  traffic-classifier-backend --pps 50000");
+                println!();
+                println!("  # Real capture on loopback");
+                println!("  traffic-classifier-backend --mode pcap --interface lo0");
+                std::process::exit(0);
+            }
+            _ => {}
+        }
+    }
+
     tracing_subscriber::fmt::init();
 
     println!("Starting Traffic Classifier Backend...");
-    println!("WebSocket server: ws://localhost:8080");
+    println!("  Capture mode: {}", config.mode);
+    if let Some(ref iface) = config.interface {
+        println!("  Interface: {}", iface);
+    }
+    if config.mode == "simulation" {
+        println!("  Target PPS: {}", config.simulation_pps);
+    }
+    println!("WebSocket server: ws://localhost:{}", ws_port);
 
     let state = Arc::new(AppState::new());
     let state_clone = state.clone();
 
     let capture_state = state.clone();
     tokio::spawn(async move {
-        start_capture_task("lo0".to_string(), capture_state).await;
+        start_capture_task(config, capture_state).await;
     });
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await?;
+    let addr = format!("127.0.0.1:{}", ws_port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     loop {
         if let Ok((stream, _addr)) = listener.accept().await {
