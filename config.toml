@@ -1,0 +1,134 @@
+# Traffic Classifier Configuration
+# 
+# This file contains all configuration options for the traffic classifier.
+# You can override values with command-line arguments.
+#
+# Example usage:
+#   traffic-classifier-backend --config config.toml
+#   traffic-classifier-backend  # uses defaults
+
+# ============================================================================
+# Capture Settings
+# ============================================================================
+
+[capture]
+# Capture mode: "simulation" or "pcap"
+mode = "simulation"
+
+# Network interface for pcap mode
+# Examples: "eth0", "lo0", "en0"
+interface = "lo0"
+
+# BPF filter for pcap mode (optional)
+filter = "tcp or udp"
+
+# Packets per second for simulation mode
+simulation_pps = 10000
+
+# Enable verbose logging
+verbose = false
+
+# Maximum packets per second (0 = unlimited)
+max_pps = 0
+
+# ============================================================================
+# Classification Settings
+# ============================================================================
+
+[classification]
+# Use ML model instead of rule-based classification
+use_ml = false
+
+# Path to ONNX model file (optional)
+model_path = "classifier/TrafficClassifier.onnx"
+
+# Confidence threshold for classification
+confidence_threshold = 0.5
+
+# Unknown classification fallback
+unknown_class = "Unknown"
+
+# ============================================================================
+# WebSocket Server Settings
+# ============================================================================
+
+[server]
+# WebSocket server host
+host = "127.0.0.1"
+
+# WebSocket server port
+port = 8080
+
+# Maximum concurrent WebSocket connections
+max_connections = 100
+
+# Stats update interval in milliseconds
+stats_interval_ms = 200
+
+# Enable ping/pong heartbeats
+enable_heartbeat = true
+
+# Heartbeat interval in seconds
+heartbeat_interval = 30
+
+# ============================================================================
+# Flow Tracking Settings
+# ============================================================================
+
+[flow]
+# Enable flow tracking
+enabled = true
+
+# Flow timeout in seconds (inactive flows are removed)
+timeout_seconds = 300
+
+# Maximum number of concurrent flows
+max_flows = 10000
+
+# Aggregate packets into micro-batches
+batch_size = 100
+
+# ============================================================================
+# Performance Settings
+# ============================================================================
+
+[performance]
+# Worker threads for packet processing (0 = auto)
+worker_threads = 0
+
+# Channel buffer size for packet queue
+channel_buffer_size = 1000
+
+# Enable performance metrics collection
+metrics_enabled = true
+
+# Metrics export interval in seconds
+metrics_interval = 60
+
+# ============================================================================
+# Logging Settings
+# ============================================================================
+
+[logging]
+# Log level: trace, debug, info, warn, error
+log_level = "info"
+
+# Log to file (optional)
+log_file = ""
+
+# Enable JSON logging for machine parsing
+json_log = false
+
+# ============================================================================
+# Development Settings (for testing only)
+# ============================================================================
+
+[dev]
+# Enable simulation of packet loss
+packet_loss_percent = 0
+
+# Add artificial delay in microseconds
+artificial_delay_us = 0
+
+# Seed for deterministic simulation
+simulation_seed = 42

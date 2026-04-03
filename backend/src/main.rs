@@ -1,5 +1,6 @@
 use anyhow::Result;
 use capture::{start_capture, CaptureConfig, ClassifierOutput};
+use config::Config;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,6 +8,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::PathBuf;
+
+mod config;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsMessage {
@@ -96,11 +100,13 @@ impl AppState {
 async fn handle_ws_connection(
     stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
+    stats_interval_ms: u32,
 ) {
     let (mut write, mut read) = stream.split();
 
     let state_clone = state.clone();
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
+    let interval_duration = std::time::Duration::from_millis(stats_interval_ms as u64);
+    let mut interval = tokio::time::interval(interval_duration);
 
     loop {
         tokio::select! {
@@ -126,8 +132,9 @@ async fn handle_ws_connection(
 async fn start_capture_task(
     config: CaptureConfig,
     state: Arc<AppState>,
+    channel_buffer_size: u32,
 ) {
-    let (tx, mut rx) = mpsc::channel::<ClassifierOutput>(1000);
+    let (tx, mut rx) = mpsc::channel::<ClassifierOutput>(channel_buffer_size as usize);
 
     tokio::spawn(async move {
         if let Err(e) = start_capture(config, tx).await {
@@ -140,90 +147,147 @@ async fn start_capture_task(
     }
 }
 
+fn print_help() {
+    println!("Traffic Classifier Backend v{}", env!("CARGO_PKG_VERSION"));
+    println!();
+    println!("USAGE:");
+    println!("  traffic-classifier-backend [OPTIONS]");
+    println!();
+    println!("OPTIONS:");
+    println!("  -c, --config FILE      Load configuration from TOML file");
+    println!("  -m, --mode MODE        Capture mode: simulation (default) or pcap");
+    println!("  -i, --interface IFACE  Network interface for pcap mode (e.g., eth0, lo0)");
+    println!("  -p, --pps RATE         Packets per second for simulation (default: 10000)");
+    println!("      --port PORT        WebSocket server port (default: 8080)");
+    println!("  -v, --verbose          Enable verbose logging");
+    println!("  -h, --help             Show this help message");
+    println!();
+    println!("EXAMPLES:");
+    println!("  # Default: simulation mode, 10K pps, port 8080");
+    println!("  traffic-classifier-backend");
+    println!();
+    println!("  # High-speed simulation");
+    println!("  traffic-classifier-backend --pps 50000");
+    println!();
+    println!("  # Load from config file");
+    println!("  traffic-classifier-backend --config config.toml");
+    println!();
+    println!("  # Real capture on loopback");
+    println!("  traffic-classifier-backend --mode pcap --interface lo0");
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command-line arguments
     let args: Vec<String> = std::env::args().collect();
     
-    // Default to simulation mode
-    let mut config = CaptureConfig::simulation();
-    let mut ws_port = 8080;
+    let mut config_file: Option<&str> = None;
+    let mut mode: Option<&str> = None;
+    let mut interface: Option<&str> = None;
+    let mut pps: Option<u32> = None;
+    let mut port: Option<u16> = None;
+    let mut verbose: Option<bool> = None;
     
-    for i in 1..args.len() {
+    let mut i = 1;
+    while i < args.len() {
         match args[i].as_str() {
-            "--mode" | "-m" if i + 1 < args.len() => {
-                config.mode = args[i + 1].clone();
+            "-c" | "--config" if i + 1 < args.len() => {
+                config_file = Some(&args[i + 1]);
+                i += 2;
             }
-            "--interface" | "-i" if i + 1 < args.len() => {
-                config.interface = Some(args[i + 1].clone());
+            "-m" | "--mode" if i + 1 < args.len() => {
+                mode = Some(&args[i + 1]);
+                i += 2;
             }
-            "--pps" if i + 1 < args.len() => {
-                config.simulation_pps = args[i + 1].parse().unwrap_or(10000);
+            "-i" | "--interface" if i + 1 < args.len() => {
+                interface = Some(&args[i + 1]);
+                i += 2;
+            }
+            "-p" | "--pps" if i + 1 < args.len() => {
+                pps = Some(args[i + 1].parse().unwrap_or(10000));
+                i += 2;
             }
             "--port" if i + 1 < args.len() => {
-                ws_port = args[i + 1].parse().unwrap_or(8080);
+                port = Some(args[i + 1].parse().unwrap_or(8080));
+                i += 2;
             }
-            "--verbose" | "-v" => {
-                config.verbose = true;
+            "-v" | "--verbose" => {
+                verbose = Some(true);
+                i += 1;
             }
-            "--help" | "-h" => {
-                println!("Traffic Classifier Backend");
-                println!();
-                println!("Usage: traffic-classifier-backend [OPTIONS]");
-                println!();
-                println!("Capture Options:");
-                println!("  -m, --mode MODE       Capture mode: simulation (default) or pcap");
-                println!("  -i, --interface IFACE Network interface for pcap mode (e.g., eth0, lo0)");
-                println!("  -p, --pps RATE        Packets per second for simulation (default: 10000)");
-                println!("  -v, --verbose         Enable verbose logging");
-                println!();
-                println!("Server Options:");
-                println!("  --port PORT          WebSocket server port (default: 8080)");
-                println!();
-                println!("Examples:");
-                println!("  # Simulation mode (default)");
-                println!("  traffic-classifier-backend");
-                println!();
-                println!("  # High-speed simulation");
-                println!("  traffic-classifier-backend --pps 50000");
-                println!();
-                println!("  # Real capture on loopback");
-                println!("  traffic-classifier-backend --mode pcap --interface lo0");
+            "-h" | "--help" => {
+                print_help();
                 std::process::exit(0);
             }
-            _ => {}
+            _ => i += 1,
         }
     }
 
-    tracing_subscriber::fmt::init();
+    // Load configuration
+    let config = Config::from_cli(
+        config_file,
+        mode,
+        interface,
+        pps,
+        port,
+        verbose,
+    )?;
 
-    println!("Starting Traffic Classifier Backend...");
-    println!("  Capture mode: {}", config.mode);
-    if let Some(ref iface) = config.interface {
+    // Setup logging based on config
+    // Use RUST_LOG environment variable for filtering
+    if let Ok(_) = std::env::var("RUST_LOG") {
+        tracing_subscriber::fmt::init();
+    } else {
+        // Set default log level based on config
+        let log_level = match config.logging.log_level.as_str() {
+            "trace" => "trace",
+            "debug" => "debug",
+            "info" => "info",
+            "warn" => "warn",
+            "error" => "error",
+            _ => "info",
+        };
+        std::env::set_var("RUST_LOG", log_level);
+        let _ = tracing_subscriber::fmt::try_init();
+    }
+
+    println!("Starting Traffic Classifier Backend v{}", env!("CARGO_PKG_VERSION"));
+    println!("  Capture mode: {}", config.capture.mode);
+    if let Some(ref iface) = config.capture.interface {
         println!("  Interface: {}", iface);
     }
-    if config.mode == "simulation" {
-        println!("  Target PPS: {}", config.simulation_pps);
+    if config.capture.mode == "simulation" {
+        println!("  Target PPS: {}", config.capture.simulation_pps);
     }
-    println!("WebSocket server: ws://localhost:{}", ws_port);
+    println!("WebSocket server: ws://{}:{}", config.server.host, config.server.port);
 
     let state = Arc::new(AppState::new());
     let state_clone = state.clone();
 
+    // Start capture task with config
+    let capture_config: capture::CaptureConfig = config.capture.clone().into();
     let capture_state = state.clone();
+    let buffer_size = config.performance.channel_buffer_size;
+    
     tokio::spawn(async move {
-        start_capture_task(config, capture_state).await;
+        start_capture_task(capture_config, capture_state, buffer_size).await;
     });
 
-    let addr = format!("127.0.0.1:{}", ws_port);
+    // Start WebSocket server
+    let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let stats_interval = config.server.stats_interval_ms;
+
+    println!("Server listening on {}", addr);
+    println!("Stats updates every {}ms", stats_interval);
 
     loop {
         if let Ok((stream, _addr)) = listener.accept().await {
             let state = state_clone.clone();
+            let interval = stats_interval;
             tokio::spawn(async move {
                 if let Ok(ws_stream) = accept_async(stream).await {
-                    handle_ws_connection(ws_stream, state).await;
+                    handle_ws_connection(ws_stream, state, interval).await;
                 }
             });
         }

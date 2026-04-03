@@ -8,19 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Project Initialization**: Created traffic classifier with Rust + PyTorch + React stack
-- **Simulation Mode**: Implemented synthetic packet generation (~10K pkt/s) for testing without real network access
-- **WebSocket Backend**: Real-time stats streaming at 5Hz to frontend
-- **React Dashboard**: Live visualization with protocol distribution, top flows, throughput charts
-- **GitHub Repository**: Public repo with comprehensive README and MIT license
-- **Clean Git History**: Removed build artifacts and node_modules from version control
-- **CaptureConfig**: Unified configuration system for simulation/pcap modes
-- **CLI Arguments**: Command-line options for mode, interface, PPS, port, verbose
-- **Extensive Documentation**: Full module-level docs in Rust code
+- **TOML Config Support**: Full configuration file system (`config.toml`)
+  - Capture, classification, server, flow, performance, logging, dev sections
+  - CLI args: `-c/--config` to load config file
+- **Config Module**: Rust config parsing with serde
+  - `backend/src/config.rs` - Full configuration handling
+  - Default values, file loading, CLI override precedence
+- **Structured Logging**: Configurable log levels (trace, debug, info, warn, error)
 
 ### Changed
-- **capture/capture.rs**: Refactored with CaptureConfig, proper documentation, test coverage
-- **backend/main.rs**: Added CLI argument parsing, configurable WebSocket port
+- **README**: Complete rewrite for human readability
+  - Quick start in 3 steps
+  - ASCII diagram showing how it works
+  - Command reference table
+  - Troubleshooting section
+
+### Fixed
+- **Rust compiler warnings**: Unused imports, duplicate path imports
 
 ### Architecture
 ```
