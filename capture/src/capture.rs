@@ -412,25 +412,97 @@ async fn start_simulation(
 }
 
 // ============================================================================
-// Pcap Mode Implementation (Stub - requires pcap feature)
+// ============================================================================
+// Pcap Mode Implementation
 // ============================================================================
 
 /// Run pcap mode - capture real packets from network interface.
-/// 
-/// TODO: Implement real packet capture with pcap crate.
-/// Requires pcap dependency and appropriate permissions.
-/// 
-/// On Linux: Use AF_XDP for ~10x performance improvement.
-/// On macOS: Use BPF (limited to 64KB packets).
+///
+/// On Linux: Can use AF_XDP for ~10x performance improvement.
+/// On macOS: Uses BPF (limited to 64KB packets).
+///
+/// Requires the "pcap" feature to be enabled:
+///   cargo build --features pcap
+///
+/// Also requires:
+/// - Root permissions (or pcap group on Linux)
+/// - Network interface access
 async fn start_pcap(
-    _config: CaptureConfig,
-    _tx: mpsc::Sender<ClassifierOutput>,
+    config: CaptureConfig,
+    tx: mpsc::Sender<ClassifierOutput>,
 ) -> anyhow::Result<()> {
-    // TODO: Implement pcap capture
-    // This requires the pcap crate and proper permissions
-    // For now, fall back to simulation
-    eprintln!("Pcap mode not fully implemented, falling back to simulation");
-    start_simulation(CaptureConfig::simulation(), _tx).await
+    #[cfg(feature = "pcap")]
+    {
+        use pcap::{Capture, Device, Mode};
+        
+        let interface = config.interface.unwrap_or_else(|| "lo0".to_string());
+        let filter = config.filter.unwrap_or_else(|| "tcp or udp".to_string());
+        
+        println!("Opening interface: {}", interface);
+        
+        let device = Device::from(&interface)?;
+        let mut cap = Capture::from_device(device)?
+            .mode(Mode::Promiscuous)
+            .setnonblock()?;
+        
+        cap.set_filter(&filter)?;
+        
+        println!("Capturing packets with filter: {}", filter);
+        
+        loop {
+            match cap.next_packet() {
+                Ok(packet) => {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or(Duration::ZERO);
+                    
+                    if let Some(features) = PacketFeatures::from_slice(&packet.data, timestamp) {
+                        let class_name = classify_port(features.dst_port);
+                        
+                        let output = ClassifierOutput {
+                            features,
+                            class_id: 0,
+                            class_name: class_name.0,
+                            confidence: class_name.1,
+                            flow_stats: None,
+                        };
+                        
+                        if tx.send(output).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(pcap::Error::Timeout) => {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                Err(e) => {
+                    eprintln!("Packet capture error: {}", e);
+                    break;
+                }
+            }
+        }
+    }
+    
+    #[cfg(not(feature = "pcap"))]
+    {
+        eprintln!("===============================================================");
+        eprintln!("PCAP CAPTURE NOT AVAILABLE");
+        eprintln!("===============================================================");
+        eprintln!("To enable real packet capture:");
+        eprintln!("  1. Install libpcap: brew install libpcap (macOS)");
+        eprintln!("  2. Rebuild with pcap feature: cargo build --features pcap");
+        eprintln!("  3. Run as root or add user to pcap group");
+        eprintln!();
+        eprintln!("Current: pcap requested, falling back to simulation");
+        eprintln!("===============================================================");
+        
+        let mut sim_config = CaptureConfig::simulation();
+        sim_config.simulation_pps = config.simulation_pps;
+        sim_config.verbose = config.verbose;
+        return start_simulation(sim_config, tx).await;
+    }
+    
+    Ok(())
 }
 
 // ============================================================================

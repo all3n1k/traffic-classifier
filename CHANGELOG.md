@@ -8,20 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Benchmark Module**: Performance tracking in `backend/src/benchmark.rs`
-  - `BenchmarkMetrics` struct for tracking PPS, latency, memory
-  - `BenchmarkRecorder` for thread-safe atomic metrics
-  - `BenchmarkRunner` for running benchmark tests
-  - Integrated into AppState for live metrics
-- **TOML Config Support**: Full configuration file system (`config.toml`)
-- **Structured Logging**: Configurable log levels
+- **ML Model Training**: PyTorch model with 93.99% validation accuracy
+  - Located at `classifier/TrafficClassifier.onnx`
+  - Supports 12 protocol classes
+- **ML Inference Server**: Python HTTP server for ONNX inference
+  - `classifier/ml_server.py` - Standalone ML server
+  - POST /classify for single classification
+  - POST /batch_classify for batch processing
+  - GET /health for health check
+- **ML Client in Rust**: HTTP client for ML server communication
+  - `backend/src/ml_client.rs` - Reusable client
+  - Automatic fallback to rule-based when ML unavailable
+  - Configurable via classification.use_ml option
+- **Pcap Capture Support**: Feature-gated real packet capture
+  - Enable with `cargo build --features pcap`
+  - Falls back to simulation when pcap unavailable
+  - Helpful error messages with setup instructions
 
 ### Changed
-- **README**: Complete rewrite for human readability
-- **Backend**: Integrated benchmark recording into packet processing
+- **CaptureConfig**: Export classify_port function for rule-based fallback
+- **capture/Cargo.toml**: Add pcap feature flag
 
-### Fixed
-- Rust compiler warnings
+### Known Limitations
+- ML confidence values may exceed 1.0 (model needs calibration)
 
 ### Architecture
 ```

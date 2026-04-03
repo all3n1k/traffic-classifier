@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 mod config;
 mod benchmark;
+mod ml_client;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsMessage {

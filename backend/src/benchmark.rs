@@ -16,7 +16,7 @@
 //! println!("PPS: {}", metrics.packets_per_second());
 //! ```
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
