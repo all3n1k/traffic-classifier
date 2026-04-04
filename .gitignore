@@ -6,7 +6,6 @@ node_modules/
 dist/
 .env
 .venv/
-*.onnx
 *.pth
 __pycache__/
 *.pyc
@@ -16,3 +15,7 @@ frontend/node_modules/
 frontend/dist/
 *.lock
 Cargo.lock
+
+# ML model files - except the main classifier model
+!classifier/TrafficClassifier.onnx
+*.onnx

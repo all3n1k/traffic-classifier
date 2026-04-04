@@ -1,0 +1,15 @@
+[capture]
+mode = "simulation"
+interface = "lo0"
+simulation_pps = 10000
+
+[classification]
+use_ml = false
+model_path = "classifier/TrafficClassifier.onnx"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[logging]
+log_level = "info"

@@ -42,32 +42,36 @@ A high-performance real-time network traffic classifier that identifies network 
 
 ## Quick Start (5 minutes)
 
-### 1. Run the Backend
+### Option A: Docker (Recommended)
+
+```bash
+# Start everything with one command
+docker compose up -d
+
+# Open dashboard
+open http://localhost
+```
+
+### Option B: Manual
 
 ```bash
 # Navigate to project
 cd traffic-classifier
 
-# Build (first time only)
+# Build backend (first time only)
 cd backend
 cargo build --release
 
 # Run (simulation mode - creates fake network traffic)
 ./target/release/traffic-classifier-backend
-```
 
-### 2. Run the Frontend
-
-```bash
-# In a new terminal
-cd traffic-classifier/frontend
+# In a new terminal - start frontend
+cd ../frontend
 npm install
 npm run dev
+
+# Open http://localhost:5173
 ```
-
-### 3. Open Browser
-
-Go to **http://localhost:5173** to see the live dashboard.
 
 ---
 
@@ -198,16 +202,28 @@ cargo test
 
 ---
 
-## Roadmap
+## Docker Deployment
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and planned features.
+See [DOCKER.md](DOCKER.md) for containerized deployment instructions.
 
-### Next Steps
+```bash
+docker compose up -d
+open http://localhost
+```
 
-1. **Real packet capture** - Use pcap crate for actual network capture
-2. **ML model integration** - Add ONNX runtime for neural network classification
-3. **Docker support** - Containerize for easy deployment
-4. **Metrics** - Prometheus export for monitoring
+### Features
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Simulation mode | ✅ Working | Generates realistic synthetic traffic |
+| Real pcap capture | 🔄 Planned | Capture from real network interfaces |
+| Port-based classification | ✅ Working | Rules-based protocol detection |
+| ML classification | 🔄 Planned | PyTorch ONNX model integration |
+| Config files | ✅ Working | TOML configuration support |
+| WebSocket streaming | ✅ Working | Real-time stats to frontend |
+| CLI arguments | ✅ Working | Override config via command line |
+| Flow tracking | ✅ Working | Aggregates packets into flows |
+| Docker support | ✅ Working | Containerized deployment |
 
 ---
 

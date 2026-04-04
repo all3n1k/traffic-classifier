@@ -8,26 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Docker Support**: Containerized deployment with Docker Compose
+  - `docker-compose.yml` - Orchestrates all services
+  - `backend/Dockerfile` - Rust multi-stage build
+  - `classifier/Dockerfile` - Python ML server
+  - `frontend/Dockerfile` - Node/React build with nginx
+  - `frontend/nginx.conf` - WebSocket proxy configuration
+  - `Makefile` targets for docker-* commands
+  - `DOCKER.md` - Docker deployment documentation
+
+### Added (from previous)
 - **ML Model Training**: PyTorch model with 93.99% validation accuracy
-  - Located at `classifier/TrafficClassifier.onnx`
-  - Supports 12 protocol classes
 - **ML Inference Server**: Python HTTP server for ONNX inference
-  - `classifier/ml_server.py` - Standalone ML server
-  - POST /classify for single classification
-  - POST /batch_classify for batch processing
-  - GET /health for health check
 - **ML Client in Rust**: HTTP client for ML server communication
-  - `backend/src/ml_client.rs` - Reusable client
-  - Automatic fallback to rule-based when ML unavailable
-  - Configurable via classification.use_ml option
 - **Pcap Capture Support**: Feature-gated real packet capture
-  - Enable with `cargo build --features pcap`
-  - Falls back to simulation when pcap unavailable
-  - Helpful error messages with setup instructions
 
 ### Changed
-- **CaptureConfig**: Export classify_port function for rule-based fallback
-- **capture/Cargo.toml**: Add pcap feature flag
+- **README**: Added Docker quick start option
+- **backend/Cargo.toml**: Added pcap feature, release optimizations
 
 ### Known Limitations
 - ML confidence values may exceed 1.0 (model needs calibration)
