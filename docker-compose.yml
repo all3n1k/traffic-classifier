@@ -42,6 +42,20 @@ services:
       timeout: 10s
       retries: 3
 
+  mlx-server:
+    build:
+      context: .
+      dockerfile: classifier/Dockerfile.mlx
+    container_name: traffic-classifier-mlx
+    platform: linux/arm64
+    ports:
+      - "50052:50052"
+    networks:
+      - traffic-net
+    restart: unless-stopped
+    profiles:
+      - mlx
+
   frontend:
     build:
       context: .

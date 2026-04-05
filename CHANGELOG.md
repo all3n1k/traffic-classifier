@@ -8,24 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Docker Support**: Containerized deployment with Docker Compose
-  - `docker-compose.yml` - Orchestrates all services
-  - `backend/Dockerfile` - Rust multi-stage build
-  - `classifier/Dockerfile` - Python ML server
-  - `frontend/Dockerfile` - Node/React build with nginx
-  - `frontend/nginx.conf` - WebSocket proxy configuration
-  - `Makefile` targets for docker-* commands
-  - `DOCKER.md` - Docker deployment documentation
+- **MLX Inference Server**: Apple Silicon optimized inference
+  - `classifier/mlx_server.py` - Native MLX implementation
+  - `classifier/Dockerfile.mlx` - ARM64 Docker image
+  - `classifier/convert_to_mlx.py` - ONNX to MLX weight converter
+  - Run with `docker compose --profile mlx up -d mlx-server`
+- **MLX Weight Export**: Export trained model weights for MLX
+  - Added `export_to_mlx()` to train.py
 
 ### Added (from previous)
+- **Docker Support**: Containerized deployment with Docker Compose
 - **ML Model Training**: PyTorch model with 93.99% validation accuracy
 - **ML Inference Server**: Python HTTP server for ONNX inference
 - **ML Client in Rust**: HTTP client for ML server communication
 - **Pcap Capture Support**: Feature-gated real packet capture
-
-### Changed
-- **README**: Added Docker quick start option
-- **backend/Cargo.toml**: Added pcap feature, release optimizations
 
 ### Known Limitations
 - ML confidence values may exceed 1.0 (model needs calibration)

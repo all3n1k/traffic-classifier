@@ -50,6 +50,12 @@ docker compose up -d
 
 # Open dashboard
 open http://localhost
+
+# With ML inference (ONNX runtime)
+docker compose --profile ml up -d ml-server
+
+# With Apple Silicon MLX (faster on M1/M2/M3/M4/M5)
+docker compose --profile mlx up -d mlx-server
 ```
 
 ### Option B: Manual

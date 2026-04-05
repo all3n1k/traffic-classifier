@@ -156,8 +156,25 @@ def export_to_onnx(model_path='classifier/traffic_classifier.pth', output_path='
     
     print(f"Model exported to {output_path}")
 
+
+def export_to_mlx(model_path='classifier/traffic_classifier.pth', output_path='classifier/traffic_classifier.npz'):
+    """Export PyTorch weights to numpy archive for MLX."""
+    model = TrafficClassifier(input_dim=6, hidden_dim=64, num_classes=NUM_CLASSES)
+    model.load_state_dict(torch.load(model_path, map_location='cpu'))
+    model.eval()
+    
+    weights = {}
+    for name, param in model.named_parameters():
+        weights[name] = param.detach().numpy()
+    
+    np.savez(output_path, **weights)
+    print(f"MLX weights exported to {output_path}")
+    return output_path
+
+
 if __name__ == '__main__':
     os.makedirs('classifier', exist_ok=True)
     model = train_model(epochs=30)
     export_to_onnx()
+    export_to_mlx()
     print("Training complete!")
