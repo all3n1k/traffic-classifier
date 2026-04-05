@@ -29,6 +29,8 @@ except ImportError:
     print("Warning: MLX not available. Install with: pip install mlx")
     exit(1)
 
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
 CLASS_NAMES = ["HTTP", "HTTPS", "SSH", "FTP", "DNS", "SMTP", "MySQL", "PostgreSQL", "Redis", "MongoDB", "HTTP-Alt", "Unknown"]
 NUM_CLASSES = len(CLASS_NAMES)
 
@@ -36,25 +38,28 @@ NUM_CLASSES = len(CLASS_NAMES)
 class TrafficClassifierMLX(nn.Module):
     def __init__(self, input_dim=6, hidden_dim=64, num_classes=NUM_CLASSES):
         super().__init__()
-        self.layers = [
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim * 2, num_classes)
-        ]
+        self.layer1 = nn.Linear(input_dim, hidden_dim)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(0.2)
+        self.layer2 = nn.Linear(hidden_dim, hidden_dim * 2)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(0.2)
+        self.layer3 = nn.Linear(hidden_dim * 2, num_classes)
     
     def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
+        x = self.layer1(x)
+        x = self.relu1(x)
+        x = self.dropout1(x)
+        x = self.layer2(x)
+        x = self.relu2(x)
+        x = self.dropout2(x)
+        x = self.layer3(x)
         return x
 
 
 class MLXServer:
     def __init__(self, weights_path: str = None):
-        print(f"Initializing MLX on {mx.get_optimal_thead_count()} threads...")
+        print(f"Initializing MLX...")
         
         self.model = TrafficClassifierMLX(input_dim=6, hidden_dim=64, num_classes=NUM_CLASSES)
         
@@ -70,9 +75,24 @@ class MLXServer:
     
     def load_weights(self, npz_weights):
         """Load weights from numpy archive into MLX model."""
+        weight_map = {
+            'layers.0.weight': ('layer1', 'weight'),
+            'layers.0.bias': ('layer1', 'bias'),
+            'layers.3.weight': ('layer2', 'weight'),
+            'layers.3.bias': ('layer2', 'bias'),
+            'layers.6.weight': ('layer3', 'weight'),
+            'layers.6.bias': ('layer3', 'bias'),
+        }
+        
         state = {}
         for key, value in npz_weights.items():
-            state[key] = mx.array(value)
+            if key in weight_map:
+                layer, param_name = weight_map[key]
+                if layer not in state:
+                    state[layer] = {}
+                state[layer][param_name] = mx.array(value)
+            else:
+                state[key] = mx.array(value)
         
         self.model.update(state)
     
