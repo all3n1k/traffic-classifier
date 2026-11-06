@@ -19,3 +19,6 @@ Cargo.lock
 # ML model files - except the main classifier model
 !classifier/TrafficClassifier.onnx
 *.onnx
+
+# Local development context and working notes
+/.private-notes/

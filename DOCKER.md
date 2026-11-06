@@ -1,102 +1,43 @@
-# Traffic Classifier Docker Deployment
+# Container setup
 
-Containerized deployment for the traffic classifier using Docker Compose.
+The checked-in Compose file defines:
 
-## Architecture
+| Service | Host port | Purpose |
+| --- | --- | --- |
+| frontend | 80 | React dashboard served by nginx |
+| backend | 8080 | Rust WebSocket statistics server |
+| ml-server | 50051 | Python ONNX inference HTTP service |
+| mlx-server | 50052 | Optional MLX experiment under the `mlx` profile |
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Frontend    │────▶│   Backend   │────▶│  ML Server  │
-│  (nginx)     │◀────│   (Rust)    │◀────│  (Python)  │
-│   :80        │     │   :8080     │     │   :50051    │
-└─────────────┘     └─────────────┘     └─────────────┘
-```
+From the repository root:
 
-## Quick Start
-
-```bash
-# Build and start all services
-make docker-build
-make docker-up
-
-# Open browser
-open http://localhost
-```
-
-Or use Docker Compose directly:
-
-```bash
-docker compose up -d
+```sh
+docker compose up -d --build
 docker compose logs -f
 ```
 
-## Services
+Open http://localhost. Stop the stack with `docker compose down`.
 
-| Service | Port | Description |
-|---------|------|-------------|
-| frontend | 80 | React dashboard (nginx) |
-| backend | 8080 | Rust WebSocket server |
-| ml-server | 50051 | Python ONNX inference |
+## Configuration and limits
 
-## Configuration
+The backend service mounts `config.toml` at `/app/config.toml`. Its declared
+environment selects simulation, a generated rate of 10,000 packets/second, and
+`USE_ML=false`. Check the backend's actual configuration loading when changing
+these values; a declared environment variable alone does not prove a code path
+uses it.
 
-Edit `docker-config.toml` to customize settings:
+The default packet-processing task uses port rules. Although the repository
+contains `MLClient` and the Python inference service, the backend does not
+instantiate that client in its capture task. Starting `ml-server` or changing
+`use_ml` is not evidence of model-backed end-to-end classification.
 
-```toml
-[capture]
-mode = "simulation"        # or "pcap"
-simulation_pps = 10000
+The backend Compose healthcheck requests HTTP `/health` on port 8080, while
+the current Rust listener accepts WebSocket connections. This mismatch can mark
+a running backend unhealthy. The inference server's separate `/health`
+endpoint is implemented.
 
-[classification]
-use_ml = false             # set to true to enable ML
-```
+The MLX service uses a Linux ARM container definition. Native Apple GPU
+acceleration inside that container is not established by this configuration.
 
-## With ML Classification
-
-To enable ML-based classification:
-
-```bash
-# Edit docker-config.toml
-[classification]
-use_ml = true
-
-# Restart
-docker compose restart backend
-```
-
-## Makefile Commands
-
-```bash
-make docker-build    # Build all Docker images
-make docker-up       # Start all containers
-make docker-down     # Stop all containers
-make docker-logs     # Tail all logs
-make docker-restart  # Restart everything
-make docker-shell-backend  # Shell into backend
-make docker-shell-ml      # Shell into ML server
-make docker-clean    # Remove containers and images
-```
-
-## Local Development
-
-Build without cache:
-
-```bash
-docker compose build --no-cache
-docker compose up -d
-```
-
-## Networking
-
-All services communicate via internal Docker network `traffic-net`.
-
-- Backend connects to ML server at `http://ml-server:50051`
-- Frontend proxies WebSocket to `http://backend:8080`
-
-## Production Notes
-
-For production deployment:
-1. Enable TLS on nginx
-2. Set proper `server.host = "0.0.0.0"` in config
-3. Consider using Docker secrets for sensitive config
-4. Add resource limits in docker-compose.yml
+Treat these definitions as development setup, not a validated production
+deployment. No container or hardware acceptance test is implied by the docs.
