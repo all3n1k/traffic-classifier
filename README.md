@@ -12,7 +12,7 @@ port-based rules, and streams aggregate statistics over WebSocket.
 | Dashboard | React charts for protocol counts, throughput, and grouped traffic |
 | Configuration | TOML settings and command-line options |
 | Live packet capture | Feature-gated pcap code; not part of the default build |
-| Model inference | Python ONNX/MLX servers and a Rust client module; not connected to the default capture pipeline |
+| Model inference | Optional HTTP inference; the default uses port rules |
 
 Protocol labels inferred from ports are heuristics. A service can run on a
 nonstandard port, and fixed rule confidence values are not measured accuracy.
@@ -57,9 +57,7 @@ guarantee. Configuration examples are in [config.toml](config.toml).
 docker compose up -d --build
 ```
 
-The Compose file defines the frontend, backend, and an ONNX server. The default
-backend still uses simulation and port rules. Starting a model server does not
-connect it to the backend's packet-processing path.
+The Compose file defines the frontend, backend, and an ONNX server. Published ports bind to loopback. The backend defaults to simulation and port rules; opt into inference with `USE_ML=true`.
 
 See [container notes](DOCKER.md) for the service layout and current limitations.
 
@@ -80,10 +78,9 @@ cd ../capture
 cargo test
 ```
 
-The `pcap` feature needs dependency/build integration before it can be treated
-as a supported release path: the current capture manifest lists the pcap crate
-under development dependencies. Machine-learning integration also needs an
-end-to-end check before model-backed classification can be claimed.
+Build with `cargo test --features pcap` or `cargo run --features pcap -- --mode pcap --interface <interface>`. This requires libpcap; live capture also requires OS capture permission. Requesting pcap in a build without support returns an error instead of simulating traffic.
+
+The WebSocket rejects unrelated browser origins. Keep the dashboard on loopback, or put it behind an authenticated TLS proxy and configure its exact `DASHBOARD_ORIGIN`. Capture statistics can contain sensitive network metadata.
 
 [CHANGELOG.md](CHANGELOG.md) records earlier changes. Issues and pull requests
 should include the capture mode, configuration, and reproduction steps.

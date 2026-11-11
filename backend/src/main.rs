@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_hdr_async_with_config, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::PathBuf;
@@ -36,7 +36,7 @@ pub struct FlowSummary {
 pub struct AppState {
     total_packets: Arc<AtomicU64>,
     classification_counts: RwLock<HashMap<String, u64>>,
-    last_reset: std::time::Instant,
+    rate_sample: RwLock<std::time::Instant>,
     packets_this_second: Arc<AtomicU64>,
     current_pps: RwLock<f64>,
     flows: Arc<RwLock<HashMap<String, FlowSummary>>>,
@@ -48,7 +48,7 @@ impl AppState {
         Self {
             total_packets: Arc::new(AtomicU64::new(0)),
             classification_counts: RwLock::new(HashMap::new()),
-            last_reset: std::time::Instant::now(),
+            rate_sample: RwLock::new(std::time::Instant::now()),
             packets_this_second: Arc::new(AtomicU64::new(0)),
             current_pps: RwLock::new(0.0),
             flows: Arc::new(RwLock::new(HashMap::new())),
@@ -84,12 +84,15 @@ impl AppState {
     }
 
     async fn get_stats(&self) -> StatsMessage {
-        let elapsed = self.last_reset.elapsed().as_secs_f64();
+        let mut sample = self.rate_sample.write().await;
+        let elapsed = sample.elapsed().as_secs_f64();
         if elapsed >= 1.0 {
             let pps = self.packets_this_second.swap(0, Ordering::Relaxed) as f64 / elapsed;
             *self.current_pps.write().await = pps;
+            *sample = std::time::Instant::now();
         }
 
+        drop(sample);
         let flows_list = {
             let flows = self.flows.read().await;
             flows.values().cloned().collect()
@@ -127,14 +130,14 @@ async fn handle_ws_connection(
                     if text == "ping" {
                         let _ = write.send(Message::Text("pong".to_string())).await;
                     }
-                } else if msg.is_none() {
+                } else if !matches!(msg, Some(Ok(_))) || matches!(msg, Some(Ok(Message::Close(_)))) {
                     break;
                 }
             }
             _ = interval.tick() => {
                 let stats = state_clone.get_stats().await;
                 if let Ok(json) = serde_json::to_string(&stats) {
-                    let _ = write.send(Message::Text(json)).await;
+                    if write.send(Message::Text(json)).await.is_err() { break; }
                 }
             }
         }
@@ -145,6 +148,7 @@ async fn start_capture_task(
     config: CaptureConfig,
     state: Arc<AppState>,
     channel_buffer_size: u32,
+    ml: Option<ml_client::MLClient>,
 ) {
     let (tx, mut rx) = mpsc::channel::<ClassifierOutput>(channel_buffer_size as usize);
 
@@ -154,7 +158,18 @@ async fn start_capture_task(
         }
     });
 
-    while let Some(output) = rx.recv().await {
+    while let Some(mut output) = rx.recv().await {
+        if let Some(client) = &ml {
+            let f = &output.features;
+            let raw = [f.src_port as f32, f.dst_port as f32, f.protocol as f32, f.packet_size as f32, f.payload_size as f32, f.tcp_flags as f32];
+            if let Some(result) = client.classify(&raw).await {
+                if result.class_id < 12 && result.confidence.is_finite() && (0.0..=1.0).contains(&result.confidence) && result.class_name.len() <= 64 {
+                    output.class_id = result.class_id;
+                    output.class_name = result.class_name;
+                    output.confidence = result.confidence;
+                }
+            }
+        }
         state.record_packet(&output).await;
     }
 }
@@ -186,6 +201,22 @@ fn print_help() {
     println!();
     println!("  # Real capture on loopback");
     println!("  traffic-classifier-backend --mode pcap --interface lo0");
+}
+
+fn allow_dashboard_request(req: &tokio_tungstenite::tungstenite::handshake::server::Request, public_origin: Option<&str>) -> bool {
+    if !matches!(req.uri().path(), "/" | "/api/ws") { return false; }
+    let Some(host) = req.headers().get("host").and_then(|value| value.to_str().ok()) else { return false; };
+    let Ok(authority) = host.parse::<tokio_tungstenite::tungstenite::http::uri::Authority>() else { return false; };
+    let local = matches!(authority.host(), "localhost" | "127.0.0.1" | "[::1]");
+    match req.headers().get("origin") {
+        None => local,
+        Some(value) => value.to_str().ok().is_some_and(|origin| {
+            if let Some(allowed) = public_origin {
+                if origin == allowed && origin.split_once("://").is_some_and(|(_, from)| from == host) { return true; }
+            }
+            local && (origin.strip_prefix("http://") == Some(host) || origin.strip_prefix("https://") == Some(host))
+        }),
+    }
 }
 
 #[tokio::main]
@@ -278,11 +309,16 @@ async fn main() -> Result<()> {
 
     // Start capture task with config
     let capture_config: capture::CaptureConfig = config.capture.clone().into();
+    anyhow::ensure!(cfg!(feature = "pcap") || capture_config.mode != "pcap", "Rebuild with --features pcap for real capture");
     let capture_state = state.clone();
     let buffer_size = config.performance.channel_buffer_size;
     
-    tokio::spawn(async move {
-        start_capture_task(capture_config, capture_state, buffer_size).await;
+    let ml = if config.classification.use_ml {
+        let client = ml_client::MLClient::new(&std::env::var("ML_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string()), true);
+        if client.is_available().await { Some(client) } else { eprintln!("ML service unavailable; using port rules"); None }
+    } else { None };
+    let mut capture_task = tokio::spawn(async move {
+        start_capture_task(capture_config, capture_state, buffer_size, ml).await;
     });
 
     // Start WebSocket server
@@ -293,15 +329,59 @@ async fn main() -> Result<()> {
     println!("Server listening on {}", addr);
     println!("Stats updates every {}ms", stats_interval);
 
+    let permits = Arc::new(tokio::sync::Semaphore::new(config.server.max_connections as usize));
+    let public_origin = std::env::var("DASHBOARD_ORIGIN").ok().map(Arc::<str>::from);
     loop {
-        if let Ok((stream, _addr)) = listener.accept().await {
+        let accepted = tokio::select! {
+            result = listener.accept() => result,
+            result = &mut capture_task => {
+                result?;
+                anyhow::bail!("Packet capture stopped");
+            }
+        };
+        if let Ok((mut stream, _addr)) = accepted {
+            let permit = match permits.clone().try_acquire_owned() { Ok(p) => p, Err(_) => continue };
             let state = state_clone.clone();
             let interval = stats_interval;
+            let public_origin = public_origin.clone();
             tokio::spawn(async move {
-                if let Ok(ws_stream) = accept_async(stream).await {
+                let _permit = permit;
+                let mut prefix = [0u8; 32];
+                if let Ok(Ok(_)) = tokio::time::timeout(std::time::Duration::from_secs(5), stream.peek(&mut prefix)).await {
+                    if prefix.starts_with(b"GET /health ") {
+                        use tokio::io::AsyncWriteExt;
+                        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK").await;
+                        return;
+                    }
+                } else { return; }
+                use tokio_tungstenite::tungstenite::{handshake::server::{Request, Response, ErrorResponse}, protocol::WebSocketConfig};
+                let verify = move |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+                    if allow_dashboard_request(request, public_origin.as_deref()) { return Ok(response); }
+                    let mut denied = ErrorResponse::new(None);
+                    *denied.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+                    Err(denied)
+                };
+                let limits = WebSocketConfig { max_message_size: Some(1024), max_frame_size: Some(1024), ..Default::default() };
+                let handshake = accept_hdr_async_with_config(stream, verify, Some(limits));
+                if let Ok(Ok(ws_stream)) = tokio::time::timeout(std::time::Duration::from_secs(5), handshake).await {
                     handle_ws_connection(ws_stream, state, interval).await;
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn websocket_rejects_cross_origin_and_untrusted_host() {
+        use tokio_tungstenite::tungstenite::handshake::server::Request;
+        let make = |host, origin| Request::builder().uri("/api/ws").header("Host", host).header("Origin", origin).body(()).unwrap();
+        assert!(allow_dashboard_request(&make("localhost:5173", "http://localhost:5173"), None));
+        assert!(!allow_dashboard_request(&make("localhost:5173", "https://outside.invalid"), None));
+        assert!(!allow_dashboard_request(&make("outside.invalid", "https://outside.invalid"), None));
+        assert!(allow_dashboard_request(&make("dashboard.example", "https://dashboard.example"), Some("https://dashboard.example")));
     }
 }

@@ -15,17 +15,16 @@ API:
 """
 
 import argparse
-import json
 import numpy as np
-import onnxruntime as ort
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs
+from http.server import HTTPServer
+from inference_http import InferenceHandler
 
 CLASS_NAMES = ["HTTP", "HTTPS", "SSH", "FTP", "DNS", "SMTP", "MySQL", "PostgreSQL", "Redis", "MongoDB", "HTTP-Alt", "Unknown"]
 NUM_CLASSES = len(CLASS_NAMES)
 
 class MLServer:
     def __init__(self, model_path: str):
+        import onnxruntime as ort
         print(f"Loading ONNX model from {model_path}...")
         self.session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
         self.input_name = self.session.get_inputs()[0].name
@@ -88,81 +87,6 @@ class MLServer:
         return results
 
 
-class RequestHandler(BaseHTTPRequestHandler):
-    ml_server = None
-    
-    def do_GET(self):
-        if self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "healthy"}).encode())
-        elif self.path == "/":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"ML Inference Server - POST to /classify")
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def do_POST(self):
-        if self.path == "/classify":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            
-            try:
-                data = json.loads(body)
-                features = data.get("features", [])
-                
-                if not features:
-                    raise ValueError("Missing 'features' in request")
-                
-                result = self.ml_server.classify(features)
-                
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(result).encode())
-                
-            except Exception as e:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
-        
-        elif self.path == "/batch_classify":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            
-            try:
-                data = json.loads(body)
-                features_batch = data.get("features_batch", [])
-                
-                if not features_batch:
-                    raise ValueError("Missing 'features_batch' in request")
-                
-                results = self.ml_server.batch_classify(features_batch)
-                
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"results": results}).encode())
-                
-            except Exception as e:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
-        
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        print(f"[ML Server] {args[0]}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="ML Inference Server for Traffic Classifier")
     parser.add_argument("--model", default="TrafficClassifier.onnx", help="Path to ONNX model")
@@ -172,10 +96,10 @@ def main():
     
     # Load model
     ml_server = MLServer(args.model)
-    RequestHandler.ml_server = ml_server
+    InferenceHandler.classifier = ml_server
     
     # Start server
-    server = HTTPServer((args.host, args.port), RequestHandler)
+    server = HTTPServer((args.host, args.port), InferenceHandler)
     print(f"\nML Inference Server running on http://{args.host}:{args.port}")
     print("Endpoints:")
     print("  GET  /health     - Health check")

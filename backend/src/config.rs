@@ -86,6 +86,11 @@ impl Config {
             config = file_config;
         }
         
+        // Explicit runtime environment sits below command-line overrides.
+        if let Ok(host) = std::env::var("SERVER_HOST") { config.server.host = host; }
+        if let Ok(value) = std::env::var("USE_ML") {
+            config.classification.use_ml = value.parse().map_err(|_| anyhow::anyhow!("USE_ML must be true or false"))?;
+        }
         // Apply CLI overrides
         if let Some(m) = mode {
             config.capture.mode = m.to_string();
@@ -103,6 +108,11 @@ impl Config {
             config.capture.verbose = v;
         }
         
+        anyhow::ensure!(matches!(config.capture.mode.as_str(), "simulation" | "pcap"), "Unknown capture mode");
+        anyhow::ensure!(config.capture.simulation_pps > 0, "simulation_pps must be positive");
+        anyhow::ensure!(config.server.stats_interval_ms >= 10, "stats_interval_ms must be at least 10");
+        anyhow::ensure!((1..=1024).contains(&config.server.max_connections), "max_connections must be 1..1024");
+        anyhow::ensure!((1..=1_000_000).contains(&config.performance.channel_buffer_size), "Invalid channel buffer size");
         Ok(config)
     }
 }

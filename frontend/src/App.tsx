@@ -27,7 +27,7 @@ function App() {
 
   useEffect(() => {
     const connect = () => {
-      const ws = new WebSocket('ws://localhost:8080')
+      const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/ws`)
       
       ws.onopen = () => {
         setConnected(true)
@@ -106,7 +106,7 @@ function App() {
         />
         <StatCard 
           label="Protocols" 
-          value={stats ? Object.keys(stats.classifications).length : '0'} 
+          value={stats ? String(Object.keys(stats.classifications).length) : '0'}
           icon="🔬"
         />
         <StatCard 

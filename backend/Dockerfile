@@ -1,27 +1,14 @@
-[package]
-name = "traffic-classifier-backend"
-version = "0.2.0"
-edition = "2021"
+FROM rust:1.94-bookworm AS builder
+WORKDIR /workspace
+COPY capture ./capture
+COPY backend ./backend
+RUN cargo build --locked --release --manifest-path backend/Cargo.toml
 
-[dependencies]
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.24"
-futures-util = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-anyhow = "1"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-capture = { path = "../capture" }
-chrono = "0.4"
-toml = "0.8"
-reqwest = { version = "0.12", features = ["json"] }
-
-[features]
-default = ["pcap"]
-pcap = ["capture/pcap"]
-
-[profile.release]
-lto = true
-codegen-units = 1
-panic = "abort"
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /workspace/backend/target/release/traffic-classifier-backend /app/backend
+COPY config.toml /app/config.toml
+ENV SERVER_HOST=0.0.0.0
+EXPOSE 8080
+CMD ["/app/backend", "--config", "/app/config.toml"]

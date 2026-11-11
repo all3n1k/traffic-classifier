@@ -159,7 +159,13 @@ impl PacketFeatures {
         if eth_type != 0x0800 { return None; } // IPv4 only for now
         
         // Parse IPv4 header
+        // Later IPv4 fragments do not have transport headers.
+        if u16::from_be_bytes([data[20], data[21]]) & 0x1fff != 0 { return None; }
         let ip_header_len = ((data[14] & 0x0F) as usize) * 4;
+        let ip_total_len = u16::from_be_bytes([data[16], data[17]]) as usize;
+        if data[14] >> 4 != 4 || ip_header_len < 20 || ip_total_len < ip_header_len || 14 + ip_total_len > data.len() { return None; }
+        // Ignore Ethernet padding; honor the actual IPv4 datagram boundary.
+        let data = &data[..14 + ip_total_len];
         if data.len() < 14 + ip_header_len + 4 { return None; }
         
         let protocol = data[14 + 9];
@@ -171,7 +177,9 @@ impl PacketFeatures {
                 if data.len() < tcp_start + 20 { return None; }
                 let src_p = u16::from_be_bytes([data[tcp_start], data[tcp_start+1]]);
                 let dst_p = u16::from_be_bytes([data[tcp_start+2], data[tcp_start+3]]);
-                let payload = data.len().saturating_sub(tcp_start + 20);
+                let tcp_header_len = ((data[tcp_start + 12] >> 4) as usize) * 4;
+                if tcp_header_len < 20 || tcp_start + tcp_header_len > data.len() { return None; }
+                let payload = data.len() - tcp_start - tcp_header_len;
                 let flags = data.get(tcp_start + 13).copied().unwrap_or(0);
                 (src_p, dst_p, payload as u32, flags)
             }
@@ -180,7 +188,9 @@ impl PacketFeatures {
                 if data.len() < udp_start + 8 { return None; }
                 let src_p = u16::from_be_bytes([data[udp_start], data[udp_start+1]]);
                 let dst_p = u16::from_be_bytes([data[udp_start+2], data[udp_start+3]]);
-                let payload = data.len().saturating_sub(udp_start + 8);
+                let udp_len = u16::from_be_bytes([data[udp_start + 4], data[udp_start + 5]]) as usize;
+                if udp_len < 8 || udp_start + udp_len > data.len() { return None; }
+                let payload = udp_len - 8;
                 (src_p, dst_p, payload as u32, 0)
             }
             1 => (0, 0, 0, 0), // ICMP
@@ -299,10 +309,7 @@ pub async fn start_capture(
     match config.mode.as_str() {
         "simulation" => start_simulation(config, tx).await,
         "pcap" => start_pcap(config, tx).await,
-        _ => {
-            eprintln!("Unknown capture mode: {}, using simulation", config.mode);
-            start_simulation(CaptureConfig::simulation(), tx).await
-        }
+        _ => anyhow::bail!("Unknown capture mode: {}", config.mode),
     }
 }
 
@@ -355,7 +362,8 @@ async fn start_simulation(
     let sizes = [64, 128, 256, 512, 1024, 1400, 64, 128, 256]; // Realistic sizes
     
     // Calculate sleep duration from target PPS
-    let sleep_us = 1_000_000 / config.simulation_pps;
+    anyhow::ensure!(config.simulation_pps > 0, "simulation_pps must be positive");
+    let sleep_us = (1_000_000 / config.simulation_pps).max(1);
     
     loop {
         let src_port: u16 = (rng.next() as u16) % 64512 + 1024;
@@ -433,19 +441,21 @@ async fn start_pcap(
 ) -> anyhow::Result<()> {
     #[cfg(feature = "pcap")]
     {
-        use pcap::{Capture, Device, Mode};
+        use pcap::{Capture, Device};
         
         let interface = config.interface.unwrap_or_else(|| "lo0".to_string());
         let filter = config.filter.unwrap_or_else(|| "tcp or udp".to_string());
         
         println!("Opening interface: {}", interface);
         
-        let device = Device::from(&interface)?;
+        let device = Device::from(interface.as_str());
         let mut cap = Capture::from_device(device)?
-            .mode(Mode::Promiscuous)
+            .promisc(true)
+            .timeout(1000)
+            .open()?
             .setnonblock()?;
         
-        cap.set_filter(&filter)?;
+        cap.filter(&filter, true)?;
         
         println!("Capturing packets with filter: {}", filter);
         
@@ -472,7 +482,7 @@ async fn start_pcap(
                         }
                     }
                 }
-                Err(pcap::Error::Timeout) => {
+                Err(pcap::Error::TimeoutExpired) => {
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 Err(e) => {
@@ -485,23 +495,11 @@ async fn start_pcap(
     
     #[cfg(not(feature = "pcap"))]
     {
-        eprintln!("===============================================================");
-        eprintln!("PCAP CAPTURE NOT AVAILABLE");
-        eprintln!("===============================================================");
-        eprintln!("To enable real packet capture:");
-        eprintln!("  1. Install libpcap: brew install libpcap (macOS)");
-        eprintln!("  2. Rebuild with pcap feature: cargo build --features pcap");
-        eprintln!("  3. Run as root or add user to pcap group");
-        eprintln!();
-        eprintln!("Current: pcap requested, falling back to simulation");
-        eprintln!("===============================================================");
-        
-        let mut sim_config = CaptureConfig::simulation();
-        sim_config.simulation_pps = config.simulation_pps;
-        sim_config.verbose = config.verbose;
-        return start_simulation(sim_config, tx).await;
+        drop((config, tx));
+        anyhow::bail!("Real packet capture requires --features pcap and libpcap");
     }
-    
+
+    #[cfg(feature = "pcap")]
     Ok(())
 }
 
@@ -512,6 +510,21 @@ async fn start_pcap(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn udp_parser_rejects_truncation_and_noninitial_fragments() {
+        let mut frame = [0; 42];
+        frame[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+        frame[14] = 0x45;
+        frame[16..18].copy_from_slice(&28u16.to_be_bytes());
+        frame[23] = 17;
+        frame[36..38].copy_from_slice(&53u16.to_be_bytes());
+        frame[38..40].copy_from_slice(&8u16.to_be_bytes());
+        assert_eq!(PacketFeatures::from_slice(&frame, Duration::ZERO).unwrap().dst_port, 53);
+        assert!(PacketFeatures::from_slice(&frame[..41], Duration::ZERO).is_none());
+        frame[21] = 1;
+        assert!(PacketFeatures::from_slice(&frame, Duration::ZERO).is_none());
+    }
 
     #[test]
     fn test_classify_port() {
